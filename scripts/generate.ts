@@ -30,13 +30,22 @@ interface ListTypeDef extends TypeDefObjectBase {
   'member-values': ValSpec;
 }
 
+interface ConditionalTypeDef extends TypeDefObjectBase {
+  when: string;
+  values: ValSpec;
+}
+
 type TypeDefObject = TypeDefObjectBase | StringTypeDef | BooleanTypeDef | IntegerTypeDef | RealTypeDef | ListTypeDef;
 
-type ValDef = string | TypeDefObject;
-type ValSpec = ValDef | ValDef[];
+type ValDef = string | TypeDefObject | ConditionalTypeDef;
+type ValSpec = ValDef | ValSpec[];
 
 const isTypeDefObject = (what: ValSpec): what is TypeDefObjectBase => {
   return typeof what === 'object' && !Array.isArray(what) && (what as TypeDefObjectBase).type !== undefined;
+};
+
+const isConditional = (what: ValSpec): what is ConditionalTypeDef => {
+  return typeof what === 'object' && !Array.isArray(what) && (what as ConditionalTypeDef).when !== undefined;
 };
 
 interface EntityDetails {
@@ -52,12 +61,15 @@ interface EventDetails extends EntityDetails {
   interface: string;
 }
 
-interface ElemDetails extends EntityDetails {
+interface ElemIFace {
+  attributes: Record<string, AttributeDetails>;
+  events: Record<string, EventDetails>;
+}
+
+interface ElemDetails extends EntityDetails, ElemIFace {
   description: string;
   ref: string;
   interface: string;
-  attributes: Record<string, AttributeDetails>;
-  events: Record<string, EventDetails>;
 }
 
 interface DomDef {
@@ -86,28 +98,68 @@ const dereserveName = (name: string) => {
 };
 
 const bakeValueSpec = (spec: ValSpec): string => {
-  if (isTypeDefObject(spec)) {
-    switch (spec.type) {
-      case 'string':
-        return 'string';
-      case 'boolean':
-        return 'boolean';
-      case 'integer':
-      case 'real':
-        return 'number';
-      case 'list':
-        return 'string'; // TODO
-      default:
-        throw new Error(`Unknown value type: ${spec.type}`);
+  let useWildcard = false;
+  const types = new Set<string>();
+  const enums = new Set<string>();
+  const todo = [spec];
+
+  while (todo.length > 0) {
+    const current = todo.pop()!;
+    if (typeof current === 'string') {
+      if (current.startsWith('/') && current.endsWith('/')) {
+        // For now, the presence of a regex leads to adding a string wildcard
+        useWildcard = true;
+      } else {
+        enums.add(`"${current}"`);
+      }
+    } else if (Array.isArray(current)) {
+      todo.push(...current);
+    } else if (isConditional(current)) {
+      todo.push(current.values);
+    } else if (isTypeDefObject(current)) {
+      switch (current.type) {
+        case 'string':
+          useWildcard = true;
+          break;
+        case 'boolean':
+          types.add('boolean');
+          break;
+        case 'integer':
+        case 'real':
+          types.add('number');
+          break;
+        case 'list':
+          useWildcard = true;
+          break;
+        default:
+          throw new Error(`Unknown value type: ${current.type}`);
+      }
+    } else {
+      throw new Error(`Undecipheral values: ${current}`);
     }
   }
-  return 'string';
+
+  const members = [...types.keys(), ...enums.keys()];
+  if (useWildcard) {
+    if (members.length === 0) {
+      // If it's wildcard and nothing else...
+      return 'string';
+    } else {
+      members.push('({} & string)');
+    }
+  }
+  return members.join(' | ');
 };
 
-const bakeAttribsType = (elemDetails: ElemDetails): string => {
+const bakeAttribsType = (elemDetails: ElemIFace, interfaceName: string): string => {
   let result = '';
   result += '{\n';
-  for (const [name, details] of Object.entries(elemDetails.attributes)) {
+
+  const attribNames = Object.keys(elemDetails.attributes).sort();
+  const eventNames = Object.keys(elemDetails.events).sort();
+
+  for (const name of attribNames) {
+    const details = elemDetails.attributes[name];
     if (name.startsWith('on')) {
       throw new Error(`We currently assume that no attribute starts with "on", ${name} breaks this assumption`);
     }
@@ -118,41 +170,62 @@ const bakeAttribsType = (elemDetails: ElemDetails): string => {
     result += `  "${name}"?: ` + bakeValueSpec(details.values) + ';\n\n';
   }
 
-  for (const [name, details] of Object.entries(elemDetails.events)) {
+  for (const name of eventNames) {
+    const details = elemDetails.events[name];
     result += `  /** ${details.description}\n`;
     result += `  *\n`;
     result += `  * @see ${details.ref}\n`;
     result += `  */\n`;
-    result += `  "on${name}"?: EventHandler<${elemDetails.interface}, ${details.interface}>;\n\n`;
+    result += `  "on${name}"?: EventHandler<${interfaceName}, ${details.interface}>;\n\n`;
   }
   result += '}';
   return result;
 };
 
-const attribTypeName = (elemName: string) => `${elemName}Attribs`;
+const nonTrivialAttribs = (elemName: string, spec: DomDef) => {
+  return (
+    Object.keys(spec.elements[elemName].events).length > 0 || Object.keys(spec.elements[elemName].attributes).length > 0
+  );
+};
+const attribTypeName = (elemName: string, spec: DomDef) => {
+  if (nonTrivialAttribs(elemName, spec)) {
+    return `${elemName}Attribs`;
+  }
 
-const produceMainFile = (spec: DomDef): string => {
+  return `GlobalAttributes<${spec.elements[elemName].interface}>`;
+};
+
+const produceMainFile = (spec: DomDef, globals: ElemIFace): string => {
   let result = '';
   const attribTypes: Record<string, string> = {};
   const factories: Record<string, string> = {};
 
   for (const [elemName, elemDetails] of Object.entries(spec.elements)) {
-    attribTypes[elemName] = bakeAttribsType(elemDetails);
-    factories[elemName] = `elementFactory<HTMLElement, ${attribTypeName(elemName)}>(domNamespace, '${elemName}');`;
+    attribTypes[elemName] = bakeAttribsType(elemDetails, elemDetails.interface);
+    factories[elemName] = `elementFactory<HTMLElement, ${attribTypeName(
+      elemName,
+      spec
+    )}>(domNamespace, '${elemName}');`;
   }
 
   result += "import { EventHandler, create as domCreate } from './';\n\n";
   result += `export const domNamespace = "${spec.namespace}";\n\n`;
 
+  result += `type GlobalAttributes<IFace extends HTMLElement> = ${bakeAttribsType(globals, 'IFace')};\n\n`;
+
   for (const [elemName, v] of Object.entries(attribTypes)) {
-    result += `/** Attributes for the ${elemName} element */\n`;
-    result += `export type ${attribTypeName(elemName)} = ${v};\n\n`;
+    if (nonTrivialAttribs(elemName, spec)) {
+      result += `/** Attributes for the ${elemName} element */\n`;
+      result += `export type ${attribTypeName(elemName, spec)} = GlobalAttributes<${
+        spec.elements[elemName].interface
+      }> & ${v};\n\n`;
+    }
   }
 
   result += '\n';
   result += 'export type ElementAttribsMap = {\n';
   for (const [elemName, _] of Object.entries(attribTypes)) {
-    result += `  "${elemName}": ${attribTypeName(elemName)};\n`;
+    result += `  "${elemName}": ${attribTypeName(elemName, spec)};\n`;
   }
   result += '}\n\n';
 
@@ -173,11 +246,52 @@ const produceMainFile = (spec: DomDef): string => {
     result += `/** ${spec.elements[elemName].description}\n`;
     result += `* @see ${spec.elements[elemName].ref}\n`;
     result += `*/\n`;
-    result += `export const ${dereserveName(elemName)} = (attribs: ${attribTypeName(
+    result += `export const ${dereserveName(
       elemName
-    )}, ...childs: Child[]) => create('${elemName}', attribs, ...childs);\n\n`;
+    )} = (attribs: ElementAttribsMap['${elemName}'], ...childs: Child[]) => create('${elemName}', attribs, ...childs);\n\n`;
   }
   return result;
+};
+
+const dedupe = (cache: Record<string, unknown>, candidate: Record<string, unknown>) => {
+  const keysToRemove: string[] = [];
+  for (const [k, v] of Object.entries(cache)) {
+    if (!(k in candidate) || JSON.stringify(v) !== JSON.stringify(candidate[k])) {
+      keysToRemove.push(k);
+    }
+  }
+
+  for (const k of keysToRemove) {
+    delete cache[k];
+  }
+};
+const preprocessSpec = (spec: DomDef): ElemIFace => {
+  const cache: ElemIFace = {
+    attributes: {},
+    events: {},
+  };
+
+  let first = true;
+  for (const elem of Object.values(spec.elements)) {
+    if (first) {
+      cache.attributes = { ...elem.attributes };
+      cache.events = { ...elem.events };
+    } else {
+      dedupe(cache.attributes, elem.attributes);
+      dedupe(cache.events, elem.events);
+    }
+  }
+
+  for (const elem of Object.values(spec.elements)) {
+    for (const k of Object.keys(cache.attributes)) {
+      delete elem.attributes[k];
+    }
+    for (const k of Object.keys(cache.events)) {
+      delete elem.events[k];
+    }
+  }
+
+  return cache;
 };
 
 const main = async () => {
@@ -186,7 +300,8 @@ const main = async () => {
     throw new Error('failed to find prettier config');
   }
   const html = await loadSpec(htmlSpecFile);
-  const unformatted = produceMainFile(html);
+  const globals = preprocessSpec(html);
+  const unformatted = produceMainFile(html, globals);
   const formatted = prettier.format(unformatted, { ...prettierConfig, filepath: htmlCodeFile });
 
   await fs.promises.writeFile(htmlCodeFile, formatted, 'utf-8');
