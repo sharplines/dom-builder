@@ -28,5 +28,5 @@ jobs:
       - name: Archive built library
         uses: actions/upload-artifact@v3
         with:
-          name: "@sharplines/dom-builder"
+          name: dom-builder
           path: dist
