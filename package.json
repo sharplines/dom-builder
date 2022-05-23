@@ -1,9 +1,29 @@
 {
   "name": "@sharplines/dom-builder",
   "version": "0.1.0",
-  "description": "ultra-lightweight dom assembling",
-  "main": "index.js",
-  "private": true,
+  "description": "Ultra-lightweight dom assembling",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./html": {
+      "types": "./dist/html.d.ts",
+      "default": "./dist/html.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "index": [
+        "./dist/index.d.ts"
+      ],
+      "html": [
+        "./dist/html.d.ts"
+      ]
+    }
+  },
   "scripts": {
     "build:generate": "ts-node scripts/generate.ts",
     "build:compile": "tsc",
