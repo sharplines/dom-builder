@@ -10,6 +10,7 @@ export const setActiveDocument = (doc: Document) => {
 export type AttribSet = Record<string, unknown>;
 export type Child = Element | string;
 export type Factory<IFace extends Element, Attrs extends AttribSet> = (attribs: Attrs, ...rest: Child[]) => IFace;
+export type EventHandler<IFace extends Element, EventType> =  (this: IFace, ev: EventType) => any;
 
 /**
  * Instantiates a dom element in the current active document.
@@ -29,7 +30,12 @@ export const create = <IFace extends Element>(
   const newElem = activeDocument.createElementNS(ns, elemName) as IFace;
 
   for (const [key, value] of Object.entries(attribs)) {
-    newElem.setAttribute(key, (value as { toString(): string }).toString());
+    if(key.startsWith('on')) {
+      newElem.addEventListener(key.slice(2), value as EventListener);
+    }
+    else {
+      newElem.setAttribute(key, (value as { toString(): string }).toString());
+    }
   }
 
   newElem.append(...childs);

@@ -39,11 +39,16 @@ interface AttributeDetails extends EntityDetails {
   values: ValSpec;
 }
 
+interface EventDetails extends EntityDetails {
+  interface: string;
+}
+
 interface ElemDetails extends EntityDetails {
   description: string;
   ref: string;
   interface: string;
   attributes: Record<string, AttributeDetails>;
+  events: Record<string, EventDetails>;
 }
 
 interface DomDef {
@@ -79,11 +84,22 @@ const bakeAttribsType = (elemDetails: ElemDetails): string => {
   let result = '';
   result += '{\n';
   for (const [name, details] of Object.entries(elemDetails.attributes)) {
+    if(name.startsWith('on')) {
+      throw new Error(`We currently assume that no attribute starts with "on", ${name} breaks this assumption`);
+    }
     result += `  /** ${details.description}\n`;
     result += `  *\n`;
     result += `  * @see ${details.ref}\n`;
     result += `  */\n`;
     result += `  "${name}"?: ` + bakeValueSpec(details.values) + ';\n\n';
+  }
+
+  for (const [name, details] of Object.entries(elemDetails.events)) {
+    result += `  /** ${details.description}\n`;
+    result += `  *\n`;
+    result += `  * @see ${details.ref}\n`;
+    result += `  */\n`;
+    result += `  "on${name}"?: EventHandler<${elemDetails.interface}, ${details.interface}>;\n\n`;
   }
   result += '}';
   return result;
@@ -101,7 +117,7 @@ const produceMainFile = (spec: DomDef): string => {
     factories[elemName] = `elementFactory<HTMLElement, ${attribTypeName(elemName)}>(domNamespace, '${elemName}');`;
   }
 
-  result += "import { create as domCreate } from './';\n\n";
+  result += "import { EventHandler, create as domCreate } from './';\n\n";
   result += `export const domNamespace = "${spec.namespace}";\n\n`;
 
   for (const [elemName, v] of Object.entries(attribTypes)) {
