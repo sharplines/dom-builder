@@ -1,0 +1,3 @@
+[submodule "machine-standards"]
+	path = machine-standards
+	url = https://github.com/sharplines/machine-standards.git
