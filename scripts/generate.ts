@@ -2,33 +2,42 @@ import * as fs from 'fs';
 import * as yaml from 'js-yaml';
 import prettier from 'prettier';
 
-type StringTypeDef = {
+interface TypeDefObjectBase {
+  type: string;
+}
+interface StringTypeDef extends TypeDefObjectBase {
   type: 'string';
-};
+}
 
-type BooleanTypeDef = {
+interface BooleanTypeDef extends TypeDefObjectBase {
   type: 'boolean';
-};
+}
 
-type IntegerTypeDef = {
+interface IntegerTypeDef extends TypeDefObjectBase {
   type: 'integer';
   signed: boolean;
-};
+}
 
-type RealTypeDef = {
+interface RealTypeDef extends TypeDefObjectBase {
   type: 'real';
-};
+}
 
-type ListTypeDef = {
+interface ListTypeDef extends TypeDefObjectBase {
   type: 'list';
   separator: string;
   ordered: boolean;
   unique: boolean;
   'member-values': ValSpec;
-};
+}
 
-type ValDef = string | StringTypeDef | BooleanTypeDef | IntegerTypeDef | RealTypeDef | ListTypeDef;
+type TypeDefObject = TypeDefObjectBase | StringTypeDef | BooleanTypeDef | IntegerTypeDef | RealTypeDef | ListTypeDef;
+
+type ValDef = string | TypeDefObject;
 type ValSpec = ValDef | ValDef[];
+
+const isTypeDefObject = (what: ValSpec): what is TypeDefObjectBase => {
+  return typeof what === 'object' && !Array.isArray(what) && (what as TypeDefObjectBase).type !== undefined;
+};
 
 interface EntityDetails {
   description: string;
@@ -76,7 +85,22 @@ const dereserveName = (name: string) => {
   return isReserved(name) ? `${name}_` : name;
 };
 
-const bakeValueSpec = (_: ValSpec): string => {
+const bakeValueSpec = (spec: ValSpec): string => {
+  if (isTypeDefObject(spec)) {
+    switch (spec.type) {
+      case 'string':
+        return 'string';
+      case 'boolean':
+        return 'boolean';
+      case 'integer':
+      case 'real':
+        return 'number';
+      case 'list':
+        return 'string'; // TODO
+      default:
+        throw new Error(`Unknown value type: ${spec.type}`);
+    }
+  }
   return 'string';
 };
 
@@ -84,7 +108,7 @@ const bakeAttribsType = (elemDetails: ElemDetails): string => {
   let result = '';
   result += '{\n';
   for (const [name, details] of Object.entries(elemDetails.attributes)) {
-    if(name.startsWith('on')) {
+    if (name.startsWith('on')) {
       throw new Error(`We currently assume that no attribute starts with "on", ${name} breaks this assumption`);
     }
     result += `  /** ${details.description}\n`;
@@ -158,12 +182,12 @@ const produceMainFile = (spec: DomDef): string => {
 
 const main = async () => {
   const prettierConfig = await prettier.resolveConfig(htmlCodeFile);
-  if(!prettierConfig) {
-    throw new Error("failed to find prettier config")
+  if (!prettierConfig) {
+    throw new Error('failed to find prettier config');
   }
   const html = await loadSpec(htmlSpecFile);
   const unformatted = produceMainFile(html);
-  const formatted = prettier.format(unformatted, {...prettierConfig, filepath: htmlCodeFile});
+  const formatted = prettier.format(unformatted, { ...prettierConfig, filepath: htmlCodeFile });
 
   await fs.promises.writeFile(htmlCodeFile, formatted, 'utf-8');
 };
