@@ -8,6 +8,7 @@
     "module": "ESNext",
     "moduleResolution": "node",
     "outDir": "./dist",
+    "esModuleInterop": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,

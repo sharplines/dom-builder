@@ -1,9 +1,9 @@
-let activeDocument: Document;
+let activeDocument: Document | null = null;
 /**
  * Sets the document in which new dom elements are created.
  * @param doc The document to make active.
  */
-export const setActiveDocument = (doc: Document) => {
+export const setActiveDocument = (doc: Document | null) => {
   activeDocument = doc;
 };
 
@@ -27,7 +27,7 @@ export const create = <IFace extends Element>(
   attribs: AttribSet,
   ...childs: Child[]
 ): IFace => {
-  const newElem = activeDocument.createElementNS(ns, elemName) as IFace;
+  const newElem = activeDocument!.createElementNS(ns, elemName) as IFace;
 
   for (const [key, value] of Object.entries(attribs)) {
     if(key.startsWith('on')) {
